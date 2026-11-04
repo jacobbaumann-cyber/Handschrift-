@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Handschrift">
+<title>Handschrift</title>
+<style>
+:root{--bg:#f6f5f1;--fg:#1c1c1e;--card:#fff;--ac:#1d4ed8;--bd:#d8d6cf}
+@media(prefers-color-scheme:dark){:root{--bg:#161618;--fg:#f2f2f2;--card:#232326;--ac:#6ea0ff;--bd:#3a3a3e}}
+*{box-sizing:border-box}
+body{margin:0;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom);background:var(--bg);color:var(--fg);font:16px -apple-system,system-ui,sans-serif}
+main{max-width:900px;margin:0 auto;padding:12px 0 40px}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+button,select,textarea{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 14px}
+button{cursor:pointer}
+button.on,button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+.tabs button{flex:1}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;align-items:center}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px}
+#grid button{padding:8px 0;position:relative;font-size:18px}
+#grid button.has{border-color:#2e9d5b}
+#grid button i{position:absolute;top:1px;right:4px;font:11px sans-serif;color:#2e9d5b}
+#pad{width:100%;max-width:340px;aspect-ratio:1;background:#fff;border-radius:12px;border:1px solid var(--bd);touch-action:none;display:block;margin:0 auto}
+.pg{width:100%;border-radius:6px;border:1px solid var(--bd);background:#fff;margin-bottom:12px;display:block}
+textarea{width:100%;min-height:140px}
+.hint{font-size:14px;opacity:.7;margin:6px 0}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<main>
+<div class="tabs">
+ <button id="t1" class="on">1. Buchstaben</button>
+ <button id="t2">2. Schreiben</button>
+</div>
+
+<section id="s1">
+ <div class="card">
+  <div class="hint">Tippe ein Zeichen an und schreibe es 3 bis 5 Mal mit leichten Unterschieden. Nach jedem „Speichern“ springt die App zum nächsten Zeichen.</div>
+  <div id="grid"></div>
+ </div>
+ <div class="card">
+  <div class="row"><b>Zeichen: <span id="cur" style="font-size:22px"></span></b><span id="cnt" class="hint"></span></div>
+  <canvas id="pad" width="300" height="300"></canvas>
+  <div class="row">
+   <button id="undo">Rückgängig</button>
+   <button id="clr">Leeren</button>
+   <button id="save" class="pri">Speichern</button>
+   <button id="del">Varianten löschen</button>
+  </div>
+ </div>
+ <div class="card">
+  <div class="row">
+   <button id="exp">Sichern (Datei)</button>
+   <button id="imp">Laden (Datei)</button>
+   <input type="file" id="file" accept=".json" class="hidden">
+  </div>
+  <div class="hint">Sichere deine Buchstaben ab und zu, falls Safari Daten löscht.</div>
+ </div>
+</section>
+
+<section id="s2" class="hidden">
+ <div class="card">
+  <textarea id="txt" placeholder="Text hier einfügen …"></textarea>
+  <div class="row">
+   <select id="ink"><option value="#1a3a9c">Blau</option><option value="#222222">Schwarz</option></select>
+   <select id="ptype"><option value="l">Liniert</option><option value="k">Kariert</option><option value="x">Leer</option></select>
+  </div>
+  <div class="row">
+   <label>Größe <input type="range" id="size" min="32" max="72" value="46"></label>
+   <label>Abstand <input type="range" id="gap" min="-10" max="20" value="4"></label>
+  </div>
+  <div class="row">
+   <button id="go" class="pri">Schreiben</button>
+   <button id="pdf">Als PDF (A4) teilen</button>
+  </div>
+  <div id="miss" class="hint"></div>
+ </div>
+ <div id="pages"></div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const CHARS=Array.from("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÄÖÜäöüß0123456789.,:;!?-–•()\"'/+=%€&@#*");
+const BASE=200;
+let data={};
+try{data=JSON.parse(localStorage.getItem('hw1')||'{}')}catch(e){}
+function persist(){try{localStorage.setItem('hw1',JSON.stringify(data))}catch(e){alert('Speichern nicht möglich. Bitte Datei-Sicherung nutzen.')}}
+
+/* Tabs */
+function tab(n){$('s1').classList.toggle('hidden',n!=1);$('s2').classList.toggle('hidden',n!=2);$('t1').classList.toggle('on',n==1);$('t2').classList.toggle('on',n==2)}
+$('t1').onclick=()=>tab(1);$('t2').onclick=()=>tab(2);
+
+/* Raster */
+let sel=0;
+function grid(){
+ $('grid').innerHTML='';
+ CHARS.forEach((c,i)=>{
+  const b=document.createElement('button');
+  const n=(data[c]||[]).length;
+  b.textContent=c;if(n){b.classList.add('has');b.innerHTML=c+'<i>'+n+'</i>'}
+  if(i==sel)b.style.outline='2px solid var(--ac)';
+  b.onclick=()=>{sel=i;strokes=[];grid();redraw()};
+  $('grid').appendChild(b);
+ });
+ $('cur').textContent=CHARS[sel];
+ $('cnt').textContent=(data[CHARS[sel]]||[]).length+' Variante(n) gespeichert';
+}
+
+/* Zeichenfläche */
+const pad=$('pad'),px=pad.getContext('2d');
+let strokes=[],drawing=false;
+function redraw(){
+ px.clearRect(0,0,300,300);
+ [[60,'#e5e5e5'],[120,'#e5e5e5'],[BASE,'#9bb3e0'],[250,'#e5e5e5']].forEach(([y,c])=>{px.strokeStyle=c;px.lineWidth=1;px.beginPath();px.moveTo(0,y);px.lineTo(300,y);px.stroke()});
+ px.strokeStyle='#111';px.lineWidth=4;px.lineCap=px.lineJoin='round';
+ strokes.forEach(s=>{px.beginPath();s.forEach((p,i)=>i?px.lineTo(p[0],p[1]):px.moveTo(p[0],p[1]));if(s.length==1)px.lineTo(s[0][0]+.1,s[0][1]);px.stroke()});
+}
+function pt(e){const r=pad.getBoundingClientRect();return[Math.round((e.clientX-r.left)*300/r.width*10)/10,Math.round((e.clientY-r.top)*300/r.height*10)/10]}
+pad.onpointerdown=e=>{e.preventDefault();pad.setPointerCapture(e.pointerId);drawing=true;strokes.push([pt(e)]);redraw()};
+pad.onpointermove=e=>{if(!drawing)return;strokes[strokes.length-1].push(pt(e));redraw()};
+pad.onpointerup=pad.onpointercancel=()=>{drawing=false};
+$('undo').onclick=()=>{strokes.pop();redraw()};
+$('clr').onclick=()=>{strokes=[];redraw()};
+$('save').onclick=()=>{
+ if(!strokes.length)return;
+ const c=CHARS[sel];(data[c]=data[c]||[]);
+ data[c].push(strokes);if(data[c].length>8)data[c].shift();
+ persist();strokes=[];sel=Math.min(sel+1,CHARS.length-1);grid();redraw();
+};
+$('del').onclick=()=>{if(confirm('Alle Varianten von „'+CHARS[sel]+'“ löschen?')){delete data[CHARS[sel]];persist();grid()}};
+
+/* Sichern / Laden */
+$('exp').onclick=()=>{
+ const a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
+ a.download='handschrift.json';a.click();
+};
+$('imp').onclick=()=>$('file').click();
+$('file').onchange=e=>{
+ const f=e.target.files[0];if(!f)return;
+ const r=new FileReader();
+ r.onload=()=>{try{data=JSON.parse(r.result);persist();grid()}catch(x){alert('Datei ungültig')}};
+ r.readAsText(f);
+};
+
+/* Schreiben (A4: 1240 x 1754 px) */
+const W=1240,H=1754,G=29.5,ML=G*5,MR=80,TOP=G*6,BOT=110;
+const last={};
+function glyph(c,S,s,gp,miss){
+ const v=data[c];
+ if(!v||!v.length){miss.add(c);return null}
+ let i=Math.random()*v.length|0;
+ if(v.length>1&&i===last[c])i=(i+1+(Math.random()*(v.length-1)|0))%v.length;
+ last[c]=i;
+ const st=v[i];let a=1e9,b=-1e9;
+ st.forEach(p=>p.forEach(q=>{a=Math.min(a,q[0]);b=Math.max(b,q[0])}));
+ const k=s*(1+(Math.random()-.5)*.12);
+ return{st,a,k,w:(b-a)*k,dy:(Math.random()-.5)*S*.06,r:(Math.random()-.5)*.08,gap:S*gp/100+(Math.random()-.5)*S*.04};
+}
+function render(){
+ const S=+$('size').value,s=S/140,gp=+$('gap').value,mode=$('ptype').value,ink=$('ink').value;
+ const LH=mode=='k'?G*Math.max(2,Math.round(S*1.5/G)):Math.round(S*1.55);
+ const maxW=W-ML-MR,sp=S*.38,miss=new Set(),lines=[];
+ let line=[],x=0;
+ $('txt').value.split('\n').forEach(par=>{
+  par.split(' ').forEach(word=>{
+   const g=Array.from(word).map(c=>glyph(c,S,s,gp,miss)).filter(Boolean);
+   const ww=g.reduce((t,o)=>t+o.w+o.gap,0);
+   if(x+ww>maxW&&line.length){lines.push(line);line=[];x=0}
+   g.forEach(o=>{o.x=x;line.push(o);x+=o.w+o.gap});
+   x+=sp;
+  });
+  lines.push(line);line=[];x=0;
+ });
+ const per=Math.floor((H-BOT-TOP)/LH)+1,box=$('pages');
+ box.innerHTML='';
+ for(let p=0;p==0||p*per<lines.length;p++){
+  const cv=document.createElement('canvas');
+  cv.width=W;cv.height=H;cv.className='pg';box.appendChild(cv);
+  const c=cv.getContext('2d');
+  c.fillStyle='#fff';c.fillRect(0,0,W,H);
+  c.lineWidth=2;c.strokeStyle='#cfd9ee';
+  if(mode=='k'){
+   for(let a=0;a<W;a+=G){c.beginPath();c.moveTo(a,0);c.lineTo(a,H);c.stroke()}
+   for(let a=0;a<H;a+=G){c.beginPath();c.moveTo(0,a);c.lineTo(W,a);c.stroke()}
+  }else if(mode=='l'){
+   for(let i=0;i<per;i++){const y=TOP+i*LH+6;c.beginPath();c.moveTo(60,y);c.lineTo(W-60,y);c.stroke()}
+  }
+  if(mode!='x'){c.strokeStyle='#f0b4b4';c.beginPath();c.moveTo(ML-25,0);c.lineTo(ML-25,H);c.stroke()}
+  c.strokeStyle=ink;c.lineCap=c.lineJoin='round';
+  lines.slice(p*per,(p+1)*per).forEach((ln,li)=>{
+   const y=TOP+li*LH+(Math.random()-.5)*S*.05;
+   ln.forEach(g=>{
+    c.save();
+    c.translate(ML+g.x,y+g.dy);c.rotate(g.r);c.scale(g.k,g.k);
+    c.translate(-g.a,-BASE);
+    c.lineWidth=S*.065/g.k;
+    g.st.forEach(st=>{
+     c.beginPath();
+     st.forEach((q,i)=>i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));
+     if(st.length==1)c.lineTo(st[0][0]+.1,st[0][1]);
+     c.stroke();
+    });
+    c.restore();
+   });
+  });
+ }
+ $('miss').textContent=miss.size?'Noch nicht geschrieben: '+Array.from(miss).join(' '):'';
+}
+$('go').onclick=render;
+
+/* PDF ohne Zusatzbibliothek */
+function makePDF(jp,w,h){
+ const parts=[],offs=[],enc=new TextEncoder();let len=0;
+ const add=x=>{const b=typeof x=='string'?enc.encode(x):x;parts.push(b);len+=b.length};
+ const obj=(id,fn)=>{offs[id]=len;add(id+' 0 obj\n');fn();add('\nendobj\n')};
+ const n=jp.length;
+ add('%PDF-1.4\n');
+ obj(1,()=>add('<</Type/Catalog/Pages 2 0 R>>'));
+ obj(2,()=>add('<</Type/Pages/Count '+n+'/Kids['+jp.map((_,i)=>(3+3*i)+' 0 R').join(' ')+']>>'));
+ jp.forEach((j,i)=>{
+  const p=3+3*i,c='q 595 0 0 842 0 0 cm /Im Do Q';
+  obj(p,()=>add('<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</XObject<</Im '+(p+2)+' 0 R>>>>/Contents '+(p+1)+' 0 R>>'));
+  obj(p+1,()=>add('<</Length '+c.length+'>>\nstream\n'+c+'\nendstream'));
+  obj(p+2,()=>{add('<</Type/XObject/Subtype/Image/Width '+w+'/Height '+h+'/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length '+j.length+'>>\nstream\n');add(j);add('\nendstream')});
+ });
+ const tot=3*n+3,xr=len;
+ add('xref\n0 '+tot+'\n0000000000 65535 f \n');
+ for(let i=1;i<tot;i++)add(String(offs[i]).padStart(10,'0')+' 00000 n \n');
+ add('trailer\n<</Size '+tot+'/Root 1 0 R>>\nstartxref\n'+xr+'\n%%EOF');
+ return new Blob(parts,{type:'application/pdf'});
+}
+$('pdf').onclick=async()=>{
+ const cs=Array.from(document.querySelectorAll('.pg'));
+ if(!cs.length){alert('Tippe zuerst auf „Schreiben“.');return}
+ const jp=cs.map(c=>{const b=atob(c.toDataURL('image/jpeg',.92).split(',')[1]);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u});
+ const blob=makePDF(jp,W,H),f=new File([blob],'handschrift.pdf',{type:'application/pdf'});
+ try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return}}catch(e){if(e.name=='AbortError')return}
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='handschrift.pdf';a.click();
+};
+grid();redraw();
+</script>
+</body>
+</html>
