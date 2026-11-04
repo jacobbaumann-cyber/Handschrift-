@@ -70,12 +70,12 @@ textarea{width:100%;min-height:140px}
    <select id="ptype"><option value="l">Liniert</option><option value="k">Kariert</option><option value="x">Leer</option></select>
   </div>
   <div class="row">
-   <label>Größe <input type="range" id="size" min="32" max="72" value="46"></label>
+   <label>Größe <input type="range" id="size" min="24" max="60" value="34"></label>
    <label>Abstand <input type="range" id="gap" min="-10" max="20" value="4"></label>
   </div>
   <div class="row">
    <button id="go" class="pri">Schreiben</button>
-   <button id="pdf">Als PDF (A4) teilen</button>
+   <button id="pdf">Als Vektor-PDF teilen</button>
   </div>
   <div id="miss" class="hint"></div>
  </div>
@@ -148,8 +148,10 @@ $('file').onchange=e=>{
  r.readAsText(f);
 };
 
-/* Schreiben (A4: 1240 x 1754 px) */
-const W=1240,H=1754,G=29.5,ML=G*5,MR=80,TOP=G*6,BOT=110;
+/* Schreiben (A4: 1240 x 1754 px, Vorlagen wie dein Muster) */
+const W=1240,H=1754,F=595/W;
+const LL=51.2,LY=102,G=33.5,GX=23.3,GY=24.7;
+let PAGES=[],CFG={};
 const last={};
 function glyph(c,S,s,gp,miss){
  const v=data[c];
@@ -162,9 +164,23 @@ function glyph(c,S,s,gp,miss){
  const k=s*(1+(Math.random()-.5)*.12);
  return{st,a,k,w:(b-a)*k,dy:(Math.random()-.5)*S*.06,r:(Math.random()-.5)*.08,gap:S*gp/100+(Math.random()-.5)*S*.04};
 }
+function paper(m){
+ const seg=[];
+ if(m=='l'){for(let y=LY;y<H-100;y+=LL)seg.push([0,y,W,y]);return{seg,col:'#d6d6da',w:1.5}}
+ if(m=='k'){
+  for(let x=GX;x<W;x+=G)seg.push([x,0,x,H]);
+  for(let y=GY;y<H;y+=G)seg.push([0,y,W,y]);
+  return{seg,col:'#c9ccd1',w:1}
+ }
+ return{seg,col:'#ffffff',w:1};
+}
+function xf(it,q){
+ const g=it.g,c=Math.cos(g.r),n=Math.sin(g.r),u=q[0]-g.a,v=q[1]-BASE;
+ return[it.tx+g.k*(c*u-n*v),it.ty+g.k*(n*u+c*v)];
+}
 function render(){
- const S=+$('size').value,s=S/140,gp=+$('gap').value,mode=$('ptype').value,ink=$('ink').value;
- const LH=mode=='k'?G*Math.max(2,Math.round(S*1.5/G)):Math.round(S*1.55);
+ const S=+$('size').value,s=S/140,gp=+$('gap').value,mode=$('ptype').value;
+ const k=mode=='k',LH=k?2*G:LL,ML=k?GX+3*G:80,MR=80,y0=k?GY+3*G:LY-3;
  const maxW=W-ML-MR,sp=S*.38,miss=new Set(),lines=[];
  let line=[],x=0;
  $('txt').value.split('\n').forEach(par=>{
@@ -177,69 +193,76 @@ function render(){
   });
   lines.push(line);line=[];x=0;
  });
- const per=Math.floor((H-BOT-TOP)/LH)+1,box=$('pages');
- box.innerHTML='';
+ const per=Math.floor((H-110-y0)/LH)+1;
+ PAGES=[];
  for(let p=0;p==0||p*per<lines.length;p++){
+  const pg=[];
+  lines.slice(p*per,(p+1)*per).forEach((ln,li)=>{
+   const y=y0+li*LH+(Math.random()-.5)*S*.05;
+   ln.forEach(g=>pg.push({g,tx:ML+g.x,ty:y+g.dy}));
+  });
+  PAGES.push(pg);
+ }
+ CFG={S,mode,ink:$('ink').value};
+ draw();
+ $('miss').textContent=miss.size?'Noch nicht geschrieben: '+Array.from(miss).join(' '):'';
+}
+function draw(){
+ const box=$('pages');box.innerHTML='';
+ PAGES.forEach(pg=>{
   const cv=document.createElement('canvas');
   cv.width=W;cv.height=H;cv.className='pg';box.appendChild(cv);
-  const c=cv.getContext('2d');
+  const c=cv.getContext('2d'),pp=paper(CFG.mode);
   c.fillStyle='#fff';c.fillRect(0,0,W,H);
-  c.lineWidth=2;c.strokeStyle='#cfd9ee';
-  if(mode=='k'){
-   for(let a=0;a<W;a+=G){c.beginPath();c.moveTo(a,0);c.lineTo(a,H);c.stroke()}
-   for(let a=0;a<H;a+=G){c.beginPath();c.moveTo(0,a);c.lineTo(W,a);c.stroke()}
-  }else if(mode=='l'){
-   for(let i=0;i<per;i++){const y=TOP+i*LH+6;c.beginPath();c.moveTo(60,y);c.lineTo(W-60,y);c.stroke()}
-  }
-  if(mode!='x'){c.strokeStyle='#f0b4b4';c.beginPath();c.moveTo(ML-25,0);c.lineTo(ML-25,H);c.stroke()}
-  c.strokeStyle=ink;c.lineCap=c.lineJoin='round';
-  lines.slice(p*per,(p+1)*per).forEach((ln,li)=>{
-   const y=TOP+li*LH+(Math.random()-.5)*S*.05;
-   ln.forEach(g=>{
-    c.save();
-    c.translate(ML+g.x,y+g.dy);c.rotate(g.r);c.scale(g.k,g.k);
-    c.translate(-g.a,-BASE);
-    c.lineWidth=S*.065/g.k;
-    g.st.forEach(st=>{
-     c.beginPath();
-     st.forEach((q,i)=>i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));
-     if(st.length==1)c.lineTo(st[0][0]+.1,st[0][1]);
-     c.stroke();
-    });
-    c.restore();
-   });
-  });
- }
- $('miss').textContent=miss.size?'Noch nicht geschrieben: '+Array.from(miss).join(' '):'';
+  c.strokeStyle=pp.col;c.lineWidth=pp.w;
+  pp.seg.forEach(l=>{c.beginPath();c.moveTo(l[0],l[1]);c.lineTo(l[2],l[3]);c.stroke()});
+  c.strokeStyle=CFG.ink;c.lineWidth=CFG.S*.065;c.lineCap=c.lineJoin='round';
+  pg.forEach(it=>it.g.st.forEach(st=>{
+   c.beginPath();
+   st.forEach((q,i)=>{const t=xf(it,q);i?c.lineTo(t[0],t[1]):c.moveTo(t[0],t[1])});
+   if(st.length==1){const t=xf(it,st[0]);c.lineTo(t[0]+.1,t[1])}
+   c.stroke();
+  }));
+ });
 }
 $('go').onclick=render;
 
-/* PDF ohne Zusatzbibliothek */
-function makePDF(jp,w,h){
+/* Vektor-PDF: Striche als echte Pfade, ohne Zusatzbibliothek */
+const rgb=h=>[1,3,5].map(i=>(parseInt(h.substr(i,2),16)/255).toFixed(3)).join(' ');
+function pageStream(pg){
+ const pp=paper(CFG.mode),n=v=>v.toFixed(2);
+ let s=rgb(pp.col)+' RG '+n(pp.w*F)+' w\n';
+ pp.seg.forEach(l=>{s+=n(l[0]*F)+' '+n((H-l[1])*F)+' m '+n(l[2]*F)+' '+n((H-l[3])*F)+' l S\n'});
+ s+=rgb(CFG.ink)+' RG '+n(CFG.S*.065*F)+' w 1 J 1 j\n';
+ pg.forEach(it=>it.g.st.forEach(st=>{
+  st.forEach((q,i)=>{const t=xf(it,q);s+=n(t[0]*F)+' '+n((H-t[1])*F)+(i?' l\n':' m\n')});
+  if(st.length==1){const t=xf(it,st[0]);s+=n(t[0]*F+.05)+' '+n((H-t[1])*F)+' l\n'}
+  s+='S\n';
+ }));
+ return s;
+}
+function makePDF(sts){
  const parts=[],offs=[],enc=new TextEncoder();let len=0;
- const add=x=>{const b=typeof x=='string'?enc.encode(x):x;parts.push(b);len+=b.length};
- const obj=(id,fn)=>{offs[id]=len;add(id+' 0 obj\n');fn();add('\nendobj\n')};
- const n=jp.length;
+ const add=x=>{const b=enc.encode(x);parts.push(b);len+=b.length};
+ const obj=(id,t)=>{offs[id]=len;add(id+' 0 obj\n'+t+'\nendobj\n')};
+ const n=sts.length;
  add('%PDF-1.4\n');
- obj(1,()=>add('<</Type/Catalog/Pages 2 0 R>>'));
- obj(2,()=>add('<</Type/Pages/Count '+n+'/Kids['+jp.map((_,i)=>(3+3*i)+' 0 R').join(' ')+']>>'));
- jp.forEach((j,i)=>{
-  const p=3+3*i,c='q 595 0 0 842 0 0 cm /Im Do Q';
-  obj(p,()=>add('<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Resources<</XObject<</Im '+(p+2)+' 0 R>>>>/Contents '+(p+1)+' 0 R>>'));
-  obj(p+1,()=>add('<</Length '+c.length+'>>\nstream\n'+c+'\nendstream'));
-  obj(p+2,()=>{add('<</Type/XObject/Subtype/Image/Width '+w+'/Height '+h+'/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length '+j.length+'>>\nstream\n');add(j);add('\nendstream')});
+ obj(1,'<</Type/Catalog/Pages 2 0 R>>');
+ obj(2,'<</Type/Pages/Count '+n+'/Kids['+sts.map((_,i)=>(3+2*i)+' 0 R').join(' ')+']>>');
+ sts.forEach((s,i)=>{
+  const p=3+2*i;
+  obj(p,'<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents '+(p+1)+' 0 R>>');
+  obj(p+1,'<</Length '+enc.encode(s).length+'>>\nstream\n'+s+'endstream');
  });
- const tot=3*n+3,xr=len;
+ const tot=2*n+3,xr=len;
  add('xref\n0 '+tot+'\n0000000000 65535 f \n');
  for(let i=1;i<tot;i++)add(String(offs[i]).padStart(10,'0')+' 00000 n \n');
  add('trailer\n<</Size '+tot+'/Root 1 0 R>>\nstartxref\n'+xr+'\n%%EOF');
  return new Blob(parts,{type:'application/pdf'});
 }
 $('pdf').onclick=async()=>{
- const cs=Array.from(document.querySelectorAll('.pg'));
- if(!cs.length){alert('Tippe zuerst auf „Schreiben“.');return}
- const jp=cs.map(c=>{const b=atob(c.toDataURL('image/jpeg',.92).split(',')[1]);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u});
- const blob=makePDF(jp,W,H),f=new File([blob],'handschrift.pdf',{type:'application/pdf'});
+ if(!PAGES.length){alert('Tippe zuerst auf „Schreiben“.');return}
+ const blob=makePDF(PAGES.map(pageStream)),f=new File([blob],'handschrift.pdf',{type:'application/pdf'});
  try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return}}catch(e){if(e.name=='AbortError')return}
  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='handschrift.pdf';a.click();
 };
